@@ -2,12 +2,12 @@ import random
 import pygame
 import math
 
-# Pygame
+# Pygame setup
 
 pygame.init()
 WIDTH, HEIGHT = 800, 800
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Ball 1v1")
+pygame.display.set_caption("Ball Sim")
 
 border_size = 650
 border_thickness = 5
@@ -18,7 +18,6 @@ border_rect = pygame.Rect(
     border_size,
     border_size,
 )
-
 font = pygame.font.Font(None, 50)
 
 # Classes
@@ -46,9 +45,11 @@ class Ball():
             self.color = (235, 45, 235)
         elif type == "dagger":
             self.color = (45, 235, 45)
-        
+        elif type == "bow":
+            self.color = (255, 255, 20)
+
         self.base_color = self.color
-        
+
         if type == "unarmed":
             self.base_speed = 4
             self.max_speed = 1
@@ -63,58 +64,52 @@ class Ball():
             self.weapon = Weapon(self)
             self.attack_debounce = 500
             self.debounce = 0
-    
+
     def take_damage(self, damage):
         self.health -= damage
         self.hit_flash_time = pygame.time.get_ticks()
-
         if self.health <= 0:
             self.dead = True
 
 class Weapon():
     def __init__(self, ball):
         self.ball = ball
-        
         if ball.type == "sword":
             self.length = 100
             self.width = 50
-            self.colour = self.ball.color
-            self.angle = random.randint(0, 359)
             self.spin_speed = 3
         elif ball.type == "spear":
             self.length = 100
             self.width = 40
-            self.colour = self.ball.color
-            self.angle = random.randint(0, 359)
             self.spin_speed = 2
         elif ball.type == "dagger":
             self.length = 55
             self.width = 35
-            self.colour = self.ball.color
-            self.angle = random.randint(0, 359)
             self.spin_speed = 10
-    
+        elif ball.type == "bow":
+            self.length = 40
+            self.width = 100
+            self.spin_speed = 3
+            self.arrows = 1
+        
+        self.angle = random.randint(0, 359)
+        self.colour = self.ball.color
+
     def draw(self, dt_scale):
         self.angle += self.spin_speed * dt_scale
         rad = math.radians(self.angle)
-
         offset_x = math.cos(rad) * (self.ball.radius + 5 + self.length / 2)
         offset_y = math.sin(rad) * (self.ball.radius + 5 + self.length / 2)
-
         weapon_surf = pygame.Surface((self.width, self.length), pygame.SRCALPHA)
         pygame.draw.rect(weapon_surf, self.colour, (0, 0, self.width, self.length))
-
         rotated_surf = pygame.transform.rotate(weapon_surf, -self.angle - 90)
-
         rect_center = (self.ball.pos[0] + offset_x, self.ball.pos[1] + offset_y)
         rotated_rect = rotated_surf.get_rect(center=rect_center)
-
         screen.blit(rotated_surf, rotated_rect)
-
         return rect_center, self.angle
 
 # Helper Functions
- 
+
 def normalize(vec):
     x, y = vec
     length = math.sqrt(x*x + y*y)
@@ -191,7 +186,7 @@ def handle_collision(ball1, ball2):
 def weapons_collide(weapon1_center, weapon1_length, weapon2_center, weapon2_length):
     r1 = weapon1_length / 2
     r2 = weapon2_length / 2
-
+    
     dx = weapon2_center[0] - weapon1_center[0]
     dy = weapon2_center[1] - weapon1_center[1]
     dist_sq = dx*dx + dy*dy
@@ -209,7 +204,7 @@ def weapon_hits_ball(weapon_center, weapon_angle, weapon_length, weapon_width, t
 
     local_x = dx * math.cos(rad) + dy * math.sin(rad)
     local_y = -dx * math.sin(rad) + dy * math.cos(rad)
-
+    
     if (-half_wid - target_ball.radius <= local_x <= half_wid + target_ball.radius and
         -half_len - target_ball.radius <= local_y <= half_len + target_ball.radius):
         return True
@@ -224,10 +219,10 @@ def move_balls(balls, dt_scale):
             else:
                 ball.pos[0] += ball.direction[0] * ball.base_speed * dt_scale
                 ball.pos[1] += ball.direction[1] * ball.base_speed * dt_scale
-            
+
             ball.pos[0] += ball.knockback_velocity[0] * dt_scale
             ball.pos[1] += ball.knockback_velocity[1] * dt_scale
-
+            
             decay = 0.8 ** dt_scale
             ball.knockback_velocity[0] *= decay
             ball.knockback_velocity[1] *= decay
@@ -237,65 +232,70 @@ def move_balls(balls, dt_scale):
 
             if ball.pos[1] - ball.radius <= border_rect.top or ball.pos[1] + ball.radius >= border_rect.bottom:
                 ball.direction[1] *= -1
-            
+
             if ball.pos[0] + ball.radius > border_rect.right:
                 ball.pos[0] = border_rect.right - ball.radius - 1
-            
+
             if ball.pos[0] - ball.radius < border_rect.left:
                 ball.pos[0] = border_rect.left + ball.radius + 1
 
             if ball.pos[1] + ball.radius > border_rect.bottom:
                 ball.pos[1] = border_rect.bottom - ball.radius - 1
-            
+
             if ball.pos[1] - ball.radius < border_rect.top:
                 ball.pos[1] = border_rect.top + ball.radius + 1
 
-def weapon_check(ball1, ball2, dt_scale):
+def handle_collisions(balls):
+    for i in range(len(balls)):
+        for j in range(i + 1, len(balls)):
+            handle_collision(balls[i], balls[j])
+
+def weapon_check_all(balls, dt_scale):
     weapon_info = {}
-    for ball in [ball1, ball2]:
+    for ball in balls:
         if not ball.dead and ball.type != "unarmed":
             weapon_center, weapon_angle = ball.weapon.draw(dt_scale)
             weapon_info[ball] = (weapon_center, ball.weapon.length)
+            for opponent in balls:
+                if opponent is not ball and not opponent.dead:
+                    if weapon_hits_ball(weapon_center, weapon_angle, ball.weapon.length, ball.weapon.width, opponent):
+                        if pygame.time.get_ticks() >= ball.debounce:
+                            opponent.take_damage(ball.damage)
+                            if opponent.type == "unarmed":
+                                opponent.speed = 1
+                            dx = opponent.pos[0] - weapon_center[0]
+                            dy = opponent.pos[1] - weapon_center[1]
+                            dist = math.sqrt(dx*dx + dy*dy)
+                            if dist != 0:
+                                nx = dx / dist
+                                ny = dy / dist
+                                dot = opponent.direction[0] * nx + opponent.direction[1] * ny
+                                opponent.direction[0] -= 2 * dot * nx
+                                opponent.direction[1] -= 2 * dot * ny
+                                opponent.direction = normalize(opponent.direction)
+                                knockback_strength = 8 * dt_scale
+                                opponent.knockback_velocity[0] += nx * knockback_strength
+                                opponent.knockback_velocity[1] += ny * knockback_strength
+                            ball.debounce = pygame.time.get_ticks() + ball.attack_debounce
+                            if ball.type == "sword":
+                                ball.damage += 1
+                            elif ball.type == "spear":
+                                ball.damage += 0.5
+                                ball.weapon.length += 10
+                            elif ball.type == "dagger":
+                                ball.weapon.spin_speed += 3 * (ball.weapon.spin_speed / abs(ball.weapon.spin_speed))
 
-            opponent = ball1 if ball is ball2 else ball2
-            if not opponent.dead:
-                if weapon_hits_ball(weapon_center, weapon_angle, ball.weapon.length, ball.weapon.width, opponent):
-                    if pygame.time.get_ticks() >= ball.debounce:
-                        opponent.take_damage(ball.damage)
-                        if opponent.type == "unarmed":
-                            opponent.speed = 1
-
-                        dx = opponent.pos[0] - weapon_center[0]
-                        dy = opponent.pos[1] - weapon_center[1]
-                        dist = math.sqrt(dx*dx + dy*dy)
-                        if dist != 0:
-                            nx = dx / dist
-                            ny = dy / dist
-                            dot = opponent.direction[0] * nx + opponent.direction[1] * ny
-                            opponent.direction[0] -= 2 * dot * nx
-                            opponent.direction[1] -= 2 * dot * ny
-                            opponent.direction = normalize(opponent.direction)
-                            knockback_strength = 8 * dt_scale
-                            opponent.knockback_velocity[0] += nx * knockback_strength
-                            opponent.knockback_velocity[1] += ny * knockback_strength
-                        ball.debounce = pygame.time.get_ticks() + ball.attack_debounce
-                        if ball.type == "sword":
-                            ball.damage += 1
-                        elif ball.type == "spear":
-                            ball.damage += 0.5
-                            ball.weapon.length += 10
-                        elif ball.type == "dagger":
-                            ball.weapon.spin_speed += 3 * (ball.weapon.spin_speed / abs(ball.weapon.spin_speed))
-
-    if ball1 in weapon_info and ball2 in weapon_info:
-        w1_center, w1_length = weapon_info[ball1]
-        w2_center, w2_length = weapon_info[ball2]
-
-        if pygame.time.get_ticks() >= getattr(ball1.weapon, "hit_debounce", 0) and \
-        pygame.time.get_ticks() >= getattr(ball2.weapon, "hit_debounce", 0):
-            if weapons_collide(w1_center, w1_length, w2_center, w2_length):
-                ball1.weapon.spin_speed *= -1
-                ball2.weapon.spin_speed *= -1
-                now = pygame.time.get_ticks()
-                ball1.weapon.hit_debounce = now + 300
-                ball2.weapon.hit_debounce = now + 300
+    weapon_balls = [b for b in balls if b.type != "unarmed" and not b.dead]
+    for i in range(len(weapon_balls)):
+        for j in range(i + 1, len(weapon_balls)):
+            ball1, ball2 = weapon_balls[i], weapon_balls[j]
+            w1_center, w1_length = weapon_info[ball1]
+            w2_center, w2_length = weapon_info[ball2]
+            if pygame.time.get_ticks() >= getattr(ball1.weapon, "hit_debounce", 0) and \
+               pygame.time.get_ticks() >= getattr(ball2.weapon, "hit_debounce", 0):
+                if weapons_collide(w1_center, w1_length, w2_center, w2_length):
+                    ball1.weapon.spin_speed *= -1
+                    ball2.weapon.spin_speed *= -1
+                    now = pygame.time.get_ticks()
+                    ball1.weapon.hit_debounce = now + 300
+                    ball2.weapon.hit_debounce = now + 300
